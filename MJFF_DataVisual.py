@@ -4,25 +4,26 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 
-
 st.set_page_config(page_title="Sample Manager", layout="wide")
 
 # --- INITIALIZATION ---
 if 'master_data' not in st.session_state:
+    # Removed 'Remarks' column as requested
     st.session_state.master_data = pd.DataFrame(columns=[
-        'Sample ID', 'Datestamp', 'Sample Name', 'Run', 'Description', 'Remarks'
+        'Sample ID', 'Datestamp', 'Sample Name', 'Run', 'Description'
     ])
 
-# Store the numerical data from CSVs separately to merge later
 if 'raw_metrics_df' not in st.session_state:
     st.session_state.raw_metrics_df = pd.DataFrame()
 
 if 'processed_files' not in st.session_state:
     st.session_state.processed_files = set()
 
-# Flag to trigger the plotting section
 if 'show_plotting' not in st.session_state:
     st.session_state.show_plotting = False
+
+if 'num_plots' not in st.session_state:
+    st.session_state.num_plots = 1
 
 st.title("MJFF Analysis Data Visualization")
 
@@ -33,7 +34,6 @@ if uploaded_file:
     if uploaded_file.name not in st.session_state.processed_files:
         df = pd.read_csv(uploaded_file)
         if 'Sample' in df.columns:
-            # Store raw metrics for plotting later
             st.session_state.raw_metrics_df = pd.concat(
                 [st.session_state.raw_metrics_df, df], ignore_index=True
             ).drop_duplicates(subset=['Sample'])
@@ -41,13 +41,36 @@ if uploaded_file:
             new_ids = df['Sample'].unique()
             existing_ids = st.session_state.master_data['Sample ID'].tolist()
             new_rows = []
+
             for s_id in new_ids:
                 if s_id not in existing_ids:
-                    ds = s_id.split('-')[0] if '-' in s_id else ""
+                    # --- AUTOMATED PARSING LOGIC ---
+                    # Example: 20260511-SampleA_1
+                    parts = s_id.split('-', 1)
+                    ds = parts[0]
+                    rest = parts[1] if len(parts) > 1 else ""
+                    
+                    # Default values
+                    sample_name = rest
+                    run_val = 1
+                    
+                    # Extract Run from the last underscore
+                    if "_" in rest:
+                        name_part, run_part = rest.rsplit("_", 1)
+                        if run_part.isdigit():
+                            sample_name = name_part
+                            run_val = int(run_part)
+                        else:
+                            # If last part isn't a number (e.g. 'sc'), 
+                            # we keep the whole thing as the name
+                            sample_name = rest
+                    
                     new_rows.append({
-                        'Sample ID': s_id, 'Datestamp': ds, 
-                        'Sample Name': "", 'Run': 0, 
-                        'Description': "", 'Remarks': ""
+                        'Sample ID': s_id, 
+                        'Datestamp': ds, 
+                        'Sample Name': sample_name, 
+                        'Run': run_val, 
+                        'Description': ""
                     })
             
             if new_rows:
@@ -65,9 +88,11 @@ if not st.session_state.master_data.empty:
         st.session_state.master_data,
         key="editor_widget",
         column_config={
-            "Sample ID": st.column_config.TextColumn(disabled=True),
-            "Datestamp": st.column_config.TextColumn(disabled=True),
-            "Run": st.column_config.NumberColumn(step=1),
+            "Sample ID": st.column_config.TextColumn("Original ID", disabled=True),
+            "Datestamp": st.column_config.TextColumn("Date", disabled=True),
+            "Sample Name": st.column_config.TextColumn("Sample Name"),
+            "Run": st.column_config.NumberColumn("Run", step=1),
+            "Description": st.column_config.TextColumn("Description"),
         },
         hide_index=True,
         use_container_width=True,
@@ -80,9 +105,8 @@ if not st.session_state.master_data.empty:
             st.success("Changes saved!")
     
     with col2:
-        # This button appears once data is loaded, but only starts plotting logic when clicked
         if st.button("Proceed to Plotting 📊"):
-            st.session_state.master_data = edited_df # Final save
+            st.session_state.master_data = edited_df 
             st.session_state.show_plotting = True
 
 # --- INITIALIZE PLOT COUNTER ---
@@ -149,7 +173,7 @@ if st.session_state.show_plotting:
                 text=bar_text,
                 textposition='auto', # 'auto' puts it inside if it fits, outside if it doesn't
                 textfont=dict(size=12, color="white"), # Optional styling
-                customdata=plot_df[['Description', 'Remarks']],
+                customdata=plot_df[['Description']],
                 hovertemplate="<b>%{x}</b><br>Value: %{y}<br>Description: %{customdata[0]}<br>Remarks: %{customdata[1]}<extra></extra>"
             )
         )
