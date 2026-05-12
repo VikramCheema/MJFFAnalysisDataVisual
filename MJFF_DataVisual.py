@@ -175,73 +175,85 @@ if st.session_state.show_plotting:
         horizontal=True
     )
 
-    if view_mode == "Detailed (Show Every Run)":
-        # Sort for grouping
-        plot_df = plot_df.sort_values(by=['Sample Name', 'Datestamp', 'Run'])
-        
-        # Create the IDs for the detailed view
-        plot_df['SAMPLE ID'] = (
-            plot_df['Datestamp'].astype(str) + "_" + 
-            plot_df['Sample Name'].astype(str) + "_" + 
-            plot_df['Run'].astype(str)
-        )
-        
-        plot_df['Plot_X'] = (
-            "<span style='color:teal; font-weight:bold'>" + plot_df['Sample Name'].fillna("Unnamed") + "</span><br>" + 
-            "<span style='color:gray'>" + plot_df['Datestamp'] + "</span><br>" + 
-            "<span style='color:tomato'>Run: " + plot_df['Run'].astype(str) + "</span>"
-        )
-        display_df = plot_df
-        use_error_bars = False
-        # Table columns for detailed view
-        table_cols = ['Datestamp', 'Sample Name', 'Run', 'SAMPLE ID'] + available_metrics
-
-    else:
-        # GLOBAL AGGREGATION LOGIC
-        # We also count how many runs are in each group ('size')
-        agg_results = plot_df.groupby('Sample Name')[available_metrics].agg(['mean', 'std', 'count']).reset_index()
-        
-        # Flatten columns
-        agg_results.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in agg_results.columns]
-        
-        # Create a display ID for the global table
-        agg_results['SAMPLE ID'] = "AGGREGATED_" + agg_results['Sample Name']
-        agg_results['Plot_X'] = "<span style='color:teal; font-weight:bold'>" + agg_results['Sample Name'] + "</span>"
-        
-        display_df = agg_results
-        use_error_bars = True
-        # Table columns for global view (using the means)
-        mean_cols = [f"{m}_mean" for m in available_metrics]
-        table_cols = ['Sample Name', 'SAMPLE ID'] + mean_cols
-
-    # 2. Handle Colors
-    unique_names = plot_df['Sample Name'].unique()
-    color_palette = px.colors.qualitative.Plotly 
-    name_to_color = {name: color_palette[i % len(color_palette)] for i, name in enumerate(unique_names)}
-    display_df['BarColor'] = display_df['Sample Name'].map(name_to_color)
-
-    # 3. Render Plot Windows
+    # 2. Render Plot Windows
     for i in range(st.session_state.num_plots):
-        selected_metric = st.selectbox(
-            f"Select Metric for Plot {i+1}", 
-            available_metrics, 
-            key=f"metric_select_{i}",
-            index=i % len(available_metrics)
-        )
+        st.markdown(f"### Plot Window {i+1}")
+        c1, c2 = st.columns(2)
+        
+        with c1:
+            selected_metric = st.selectbox(
+                f"Select Metric", 
+                available_metrics, 
+                key=f"metric_select_{i}",
+                index=i % len(available_metrics)
+            )
+        with c2:
+            sort_order = st.selectbox(
+                "Sort Order",
+                ["Default (Name)", "Ascending (by Mean)", "Descending (by Mean)"],
+                key=f"sort_select_{i}"
+            )
 
-        fig = go.Figure()
+        # --- DATA PROCESSING FOR THIS SPECIFIC PLOT ---
+        if view_mode == "Detailed (Show Every Run)":
+            temp_df = plot_df.copy()
+            
+            # Grouped Sorting Logic
+            if sort_order != "Default (Name)":
+                # Calculate mean per group for sorting
+                group_means = temp_df.groupby('Sample Name')[selected_metric].mean()
+                ascending = True if "Ascending" in sort_order else False
+                sorted_names = group_means.sort_values(ascending=ascending).index
+                
+                # Turn Sample Name into a Categorical type with the sorted order
+                temp_df['Sample Name'] = pd.Categorical(temp_df['Sample Name'], categories=sorted_names, ordered=True)
+                temp_df = temp_df.sort_values(['Sample Name', 'Datestamp', 'Run'])
+            else:
+                temp_df = temp_df.sort_values(by=['Sample Name', 'Datestamp', 'Run'])
 
-        if not use_error_bars:
-            y_val = display_df[selected_metric]
+            temp_df['SAMPLE ID'] = (
+                temp_df['Datestamp'].astype(str) + "_" + 
+                temp_df['Sample Name'].astype(str) + "_" + 
+                temp_df['Run'].astype(str)
+            )
+            temp_df['Plot_X'] = (
+                "<span style='color:teal; font-weight:bold'>" + temp_df['Sample Name'].astype(str) + "</span><br>" + 
+                "<span style='color:gray'>" + temp_df['Datestamp'].astype(str) + "</span><br>" + 
+                "<span style='color:tomato'>Run: " + temp_df['Run'].astype(str) + "</span>"
+            )
+            
+            y_val = temp_df[selected_metric]
             error_val = None
-            custom_data = display_df[['Description']]
+            custom_data = temp_df[['Description']]
             htemp = "<b>%{x}</b><br>Value: %{y}<br>Description: %{customdata[0]}<extra></extra>"
+            display_df = temp_df
+
         else:
-            y_val = display_df[f"{selected_metric}_mean"]
-            error_val = display_df[f"{selected_metric}_std"]
+            # GLOBAL MODE AGGREGATION
+            agg_results = plot_df.groupby('Sample Name')[available_metrics].agg(['mean', 'std']).reset_index()
+            agg_results.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in agg_results.columns]
+            
+            if sort_order != "Default (Name)":
+                ascending = True if "Ascending" in sort_order else False
+                agg_results = agg_results.sort_values(by=f"{selected_metric}_mean", ascending=ascending)
+            
+            agg_results['SAMPLE ID'] = "AGGREGATED_" + agg_results['Sample Name']
+            agg_results['Plot_X'] = "<span style='color:teal; font-weight:bold'>" + agg_results['Sample Name'] + "</span>"
+            
+            y_val = agg_results[f"{selected_metric}_mean"]
+            error_val = agg_results[f"{selected_metric}_std"]
             custom_data = error_val
             htemp = "<b>%{x}</b><br>Mean: %{y:.2f}<br>Std Dev: %{customdata:.2f}<extra></extra>"
+            display_df = agg_results
 
+        # Handle Colors
+        unique_names = plot_df['Sample Name'].unique()
+        color_palette = px.colors.qualitative.Plotly 
+        name_to_color = {name: color_palette[i % len(color_palette)] for i, name in enumerate(unique_names)}
+        display_df['BarColor'] = display_df['Sample Name'].map(name_to_color)
+
+        # Generate Figure
+        fig = go.Figure()
         fig.add_trace(
             go.Bar(
                 x=display_df['Plot_X'], 
@@ -249,17 +261,23 @@ if st.session_state.show_plotting:
                 marker_color=display_df['BarColor'],
                 text=y_val.round(2),
                 textposition='auto',
-                error_y=dict(type='data', array=error_val, visible=True) if use_error_bars else None,
+                error_y=dict(type='data', array=error_val, visible=True) if view_mode == "Global (Mean & Std Dev)" else None,
                 customdata=custom_data,
                 hovertemplate=htemp
             )
         )
 
-        fig.update_layout(height=500, yaxis_title=selected_metric, template="plotly_white", showlegend=False)
+        fig.update_layout(
+            height=500, 
+            yaxis_title=selected_metric, 
+            template="plotly_white", 
+            showlegend=False,
+            yaxis=dict(range=[0, y_val.max() * 1.2] if not y_val.empty else None)
+        )
         fig.update_xaxes(tickangle=0)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key=f"chart_{i}")
 
-    # UI Buttons for plots
+    # Buttons and Table (unchanged logic, just ensuring table uses current display_df)
     col_btn1, col_btn2 = st.columns([1, 4])
     with col_btn1:
         if st.button("➕ Add Plot"):
@@ -271,26 +289,42 @@ if st.session_state.show_plotting:
                 st.session_state.num_plots = 1
                 st.rerun()
 
-    # 4. THE PLOTTED DATA TABLE
+    # THE PLOTTED DATA TABLE
     st.write("---")
     st.subheader("3. Plotted Data Reference Table")
+    # Note: Using the base plot_df for the final table to keep it consistent
+    table_df = plot_df.copy()
+    table_df['SAMPLE ID'] = table_df['Datestamp'] + "_" + table_df['Sample Name'] + "_" + table_df['Run'].astype(str)
     
-    # Configure columns dynamically to avoid errors in Global mode
-    base_config = {
-        "Datestamp": st.column_config.TextColumn("Date", width=100),
-        "Sample Name": st.column_config.TextColumn("Sample Name", width=150),
-        "Run": st.column_config.NumberColumn("Run", format="%d", width=60),
-        "SAMPLE ID": st.column_config.TextColumn("Combined ID", width=300),
-    }
-    
-    # Add metrics to config
-    for m in available_metrics:
-        col_name = m if not use_error_bars else f"{m}_mean"
-        base_config[col_name] = st.column_config.NumberColumn(m, width=120, format="%.2f")
-
     st.dataframe(
-        display_df[table_cols],
-        column_config=base_config,
+        table_df[['Datestamp', 'Sample Name', 'Run', 'SAMPLE ID'] + available_metrics],
+        column_config={
+            "Datestamp": st.column_config.TextColumn("Date", width=100),
+            "SAMPLE ID": st.column_config.TextColumn("Combined ID", width=300),
+            **{m: st.column_config.NumberColumn(m, width=120, format="%.2f") for m in available_metrics}
+        },
         hide_index=True,
         use_container_width=True
     )
+
+# --- RESET FUNCTIONALITY ---
+def reset_app():
+    # List all the keys we've used in the app
+    keys_to_reset = [
+        'master_data', 
+        'raw_metrics_df', 
+        'processed_files', 
+        'show_plotting', 
+        'num_plots',
+        'editor_widget' # Clear the data editor internal state too
+    ]
+    for key in keys_to_reset:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.rerun()
+
+# Place the button in the top right or a sidebar
+with st.sidebar:
+    st.header("App Controls")
+    if st.button("🔄 Restart & Clear All Data", type="primary"):
+        reset_app()
