@@ -1293,7 +1293,7 @@ if st.session_state.show_plotting:
                         textfont=dict(size=12, weight="bold")
                     ))
                     cv_fig.update_layout(
-                        title=dict(text=f"Stability Impact: PP-Gauss CV% Delta After Outlier Pruning", font=dict(size=18, weight="bold")),
+                        title=dict(text=f"Filtering Impact: PP-Gauss CV% Delta After Outlier Pruning", font=dict(size=18, weight="bold")),
                         xaxis_title="Sample Cohorts",
                         yaxis_title="Coefficient of Variation (CV %)",
                         barmode='group',
@@ -1474,40 +1474,40 @@ if st.session_state.show_plotting:
                     title_box = slide1.shapes.add_textbox(Inches(1.0), Inches(2.2), Inches(11.333), Inches(2.5))
                     tf = title_box.text_frame
                     p1 = tf.paragraphs[0]
-                    p1.text = "MJFF Analytics Executive Report"
+                    p1.text = "Cohort Summary Report"
                     p1.font.size = Pt(44)
                     p1.font.bold = True
                     p1.font.color.rgb = RGBColor(0, 51, 102)
                     
                     p2 = tf.add_paragraph()
-                    p2.text = f"Automated Instrumentation Run Summary • Outlier Baseline: {filter_metric} ({sigma_multiplier}σ)"
+                    p2.text = f"Individual Runs Summary • Outliers Filtering - Baseline: {filter_metric} ({sigma_multiplier}σ)"
                     p2.font.size = Pt(18)
                     p2.font.color.rgb = RGBColor(102, 102, 102)
 
                     # --- SLIDE 2: NEW UNFILTERED GLOBAL PROFILE SLIDE ---
                     slide_macro_orig = prs.slides.add_slide(blank_layout)
-                    add_slide_header(slide_macro_orig, "Global System Profiles: Unfiltered Cohort Data")
+                    add_slide_header(slide_macro_orig, "Global Analysis: Unfiltered Cohort Data")
                     
-                    img_orig_det = build_macro_chart(plot_df, "Detailed", is_clean=False, title="1. All Individual Runs System Timeline (Ascending by Group Mean)")
+                    img_orig_det = build_macro_chart(plot_df, "Detailed", is_clean=False, title="1. All Individual Runs (Ascending by Group Mean)")
                     slide_macro_orig.shapes.add_picture(img_orig_det, Inches(0.666), Inches(1.3), width=Inches(12.0))
                     
-                    img_orig_grp = build_macro_chart(plot_df, "Grouped", is_clean=False, title="2. Aggregated Cohort Systems Analysis (Mean ± SD Dev)")
+                    img_orig_grp = build_macro_chart(plot_df, "Grouped", is_clean=False, title="2. Aggregated by Sample Name (Mean ± SD Dev)")
                     slide_macro_orig.shapes.add_picture(img_orig_grp, Inches(0.666), Inches(4.3), width=Inches(12.0))
 
                     # --- SLIDE 3: NEW CLEANED GLOBAL PROFILE SLIDE ---
                     slide_macro_clean = prs.slides.add_slide(blank_layout)
-                    add_slide_header(slide_macro_clean, f"Global System Profiles: Refined Clean Data ({sigma_multiplier}σ Outliers Pruned)")
+                    add_slide_header(slide_macro_clean, f"Global Analysis: Refined Clean Data ({sigma_multiplier}σ Outliers Pruned)")
                     
-                    img_clean_det = build_macro_chart(global_cleaned_df, "Detailed", is_clean=True, title=f"3. Cleaned Individual Runs System Timeline (via {filter_metric})")
+                    img_clean_det = build_macro_chart(global_cleaned_df, "Detailed", is_clean=True, title=f"3. Cleaned Individual Runs (via {filter_metric})")
                     slide_macro_clean.shapes.add_picture(img_clean_det, Inches(0.666), Inches(1.3), width=Inches(12.0))
                     
-                    img_clean_grp = build_macro_chart(global_cleaned_df, "Grouped", is_clean=True, title=f"4. Cleaned Aggregated Cohort Systems Analysis (Recalculated Mean ± SD Dev)")
+                    img_clean_grp = build_macro_chart(global_cleaned_df, "Grouped", is_clean=True, title=f"4. Cleaned Aggregated by Sample Name (Recalculated Mean ± SD Dev)")
                     slide_macro_clean.shapes.add_picture(img_clean_grp, Inches(0.666), Inches(4.3), width=Inches(12.0))
 
                     # --- SLIDE 4: COHORT STABILITY DELTA GRAPH ---
                     if has_gauss:
                         slide4 = prs.slides.add_slide(blank_layout)
-                        add_slide_header(slide4, "Stability Performance: PP-Gauss CV% Variations")
+                        add_slide_header(slide4, "Filtering Performance: PP-Gauss CV% Variations")
                         
                         img_stream = BytesIO()
                         cv_fig.write_image(img_stream, format="png", width=1100, height=500, scale=2)
@@ -1584,18 +1584,18 @@ if st.session_state.show_plotting:
                     
                     for cohort in unique_cohorts:
                         slide_c = prs.slides.add_slide(blank_layout)
-                        add_slide_header(slide_c, f"Sample Run Analysis: {cohort}")
+                        add_slide_header(slide_c, f"Sample Run Analysis: {cohort} (Outliers Removed)")
                         
                         if 'PP-Gauss' in plot_df.columns:
-                            img_g = build_micro_timeline(global_cleaned_df, cohort, 'PP-Gauss', "PP-Gauss Cleaned Signal Timeline")
+                            img_g = build_micro_timeline(global_cleaned_df, cohort, 'PP-Gauss', "PP-Gauss")
                             slide_c.shapes.add_picture(img_g, Inches(0.666), Inches(1.2), width=Inches(12.0))
                             
                         if 'PP-750' in plot_df.columns:
-                            img_750 = build_micro_timeline(global_cleaned_df, cohort, 'PP-750', "PP-750 Cleaned Signal Timeline")
+                            img_750 = build_micro_timeline(global_cleaned_df, cohort, 'PP-750', "PP-750")
                             slide_c.shapes.add_picture(img_750, Inches(0.666), Inches(3.2), width=Inches(12.0))
                             
                         if 'Barcode av.' in plot_df.columns:
-                            img_bav = build_micro_timeline(global_cleaned_df, cohort, 'Barcode av.', "Barcode av. Reference Run Timeline")
+                            img_bav = build_micro_timeline(global_cleaned_df, cohort, 'Barcode av.', "Barcode average")
                             slide_c.shapes.add_picture(img_bav, Inches(0.666), Inches(5.2), width=Inches(12.0))
 
                     # Save and Deliver Presentation File Stream
