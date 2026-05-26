@@ -5,6 +5,16 @@
 # import plotly.express as px
 # import re
 # from groq import Groq
+# from io import BytesIO
+
+# # --- PPTX GENERATION DEPENDENCIES ---
+# try:
+#     from pptx import Presentation
+#     from pptx.util import Inches, Pt
+#     from pptx.dml.color import RGBColor
+#     from pptx.enum.text import PP_ALIGN
+# except ImportError:
+#     st.error("Missing dependency: please run `pip install python-pptx kaleido` in your terminal environment.")
 
 # # --- INITIALIZATION ---
 # if 'master_data' not in st.session_state:
@@ -62,7 +72,8 @@
 #     * **Bulk Management**: Use **Section 1** tools to batch-rename samples, append structural elements, or re-index counts on demand.
 #     * **Target Dropdown Filter**: In **Section 2**, cleanly isolate individual groups from your dropdown menu to instantly re-render active viewports.
 #     * **📊 Cross-Metric Outlier Filtering**: Filter out anomalies using one parameter (e.g., *Barcode std.*) and view the surviving records plotted in your core parameter (e.g., *PP-Gauss*).
-#     * **📈 Cohort Summaries**: Section 3 displays grouped analysis criteria specifically tracking variance indices of PP-Gauss data.
+#     * **📈 Cohort Summaries & CV% Shifts**: Section 3 tracks quantitative and visual shifts in the Coefficient of Variation ($CV\%$) between raw and refined streams.
+#     * **📝 Automated PPTX Generation**: Section 6 auto-compiles all charts and summary metrics into a structured presentation deck.
 #     """)
 
 # # --- AI INSIGHT ENGINE ---
@@ -222,7 +233,7 @@
 #             "Run": st.column_config.TextColumn("Run Custom Override"),
 #         },
 #         hide_index=True,
-#         use_container_width=True,
+#         width="stretch",
 #     )
 
 #     col1, col2 = st.columns([1, 5])
@@ -247,6 +258,11 @@
 #     if base_filtered.empty:
 #         st.warning("No samples marked for selection. Please check the 'Plot?' boxes in the table above.")
 #     else:
+#         # --- FIXED STICKY PALETTE INITIALIZATION ---
+#         all_unique_names = sorted(st.session_state.master_data['Sample Name'].unique())
+#         color_palette = px.colors.qualitative.Plotly
+#         sticky_palette = {name: color_palette[idx % len(color_palette)] for idx, name in enumerate(all_unique_names)}
+
 #         available_sample_names = sorted(base_filtered['Sample Name'].unique())
 #         selected_samples = st.multiselect(
 #             "🔎 Select Sample Names to Plot from Dropdown:",
@@ -298,7 +314,7 @@
 #                 key="view_mode_selector"
 #             )
 
-#             # Pre-calculate the cleaned dataset globally so it matches across all plot windows and data tables
+#             # Pre-calculate the cleaned dataset globally so it matches across all components
 #             cleaned_plot_df_list = []
 #             for name in plot_df['Sample Name'].unique():
 #                 sub = plot_df[plot_df['Sample Name'] == name]
@@ -319,7 +335,6 @@
             
 #             global_cleaned_df = pd.concat(cleaned_plot_df_list, ignore_index=True) if cleaned_plot_df_list else plot_df.copy()
 
-#             # Track total lines pruned
 #             lines_removed = len(plot_df) - len(global_cleaned_df)
 #             if lines_removed > 0:
 #                 st.toast(f"✂️ Pruned {lines_removed} outlier runs based on {filter_metric} ({sigma_multiplier}σ)!", icon="ℹ️")
@@ -385,10 +400,7 @@
 #                         htemp = "<b>%{x}</b><br>Mean: %{y:.2f}<br>Std Dev: %{customdata:.2f}<extra></extra>"
 #                         display_df = agg_results
 
-#                     unique_names = plot_df['Sample Name'].unique()
-#                     color_palette = px.colors.qualitative.Plotly 
-#                     name_to_color = {name: color_palette[idx % len(color_palette)] for idx, name in enumerate(unique_names)}
-#                     display_df['BarColor'] = display_df['Sample Name'].map(name_to_color)
+#                     display_df['BarColor'] = display_df['Sample Name'].map(sticky_palette)
 
 #                     fig = go.Figure()
 #                     fig.add_trace(
@@ -400,27 +412,35 @@
 #                             textposition='auto',
 #                             error_y=dict(type='data', array=error_val, visible=True) if view_mode == "Global (Mean & Std Dev)" else None,
 #                             customdata=custom_data,
-#                             hovertemplate=htemp
+#                             hovertemplate=htemp,
+#                             textfont=dict(size=13, weight="bold")
 #                         )
 #                     )
 
 #                     title_lbl = f"{selected_metric} (Cleaned via {filter_metric} @ {sigma_multiplier}σ)" if is_clean_view else f"{selected_metric} (Unfiltered Original Data)"
+                    
 #                     fig.update_layout(
-#                         title=title_lbl,
-#                         height=450, 
+#                         title=dict(text=title_lbl, font=dict(size=18, weight="bold")),
+#                         height=480, 
 #                         yaxis_title=selected_metric, 
 #                         template="plotly_white", 
 #                         showlegend=False,
-#                         yaxis=dict(range=[0, y_val.max() * 1.2] if not y_val.empty and not y_val.isna().all() else [0, 1])
+#                         yaxis=dict(
+#                             range=[0, y_val.max() * 1.2] if not y_val.empty and not y_val.isna().all() else [0, 1],
+#                             title_font=dict(size=14, weight="bold"),
+#                             tickfont=dict(size=12)
+#                         ),
+#                         xaxis=dict(tickfont=dict(size=12)),
+#                         hoverlabel=dict(font_size=14)
 #                     )
 #                     fig.update_xaxes(tickangle=0)
 #                     return fig
 
 #                 graph_col1, graph_col2 = st.columns(2)
 #                 with graph_col1:
-#                     st.plotly_chart(process_and_render_data(plot_df, is_clean_view=False), use_container_width=True, key=f"chart_orig_{i}")
+#                     st.plotly_chart(process_and_render_data(plot_df, is_clean_view=False), width="stretch", key=f"chart_orig_{i}")
 #                 with graph_col2:
-#                     st.plotly_chart(process_and_render_data(global_cleaned_df, is_clean_view=True), use_container_width=True, key=f"chart_clean_{i}")
+#                     st.plotly_chart(process_and_render_data(global_cleaned_df, is_clean_view=True), width="stretch", key=f"chart_clean_{i}")
 
 #             col_btn1, col_btn2 = st.columns([1, 4])
 #             with col_btn1:
@@ -433,48 +453,119 @@
 #                         st.session_state.num_plots = 1
 #                         st.rerun()
 
-#             # --- SECTION 3: COHORT SUMMARY STATISTICS TABLE ---
+#             # --- SECTION 3: COHORT SUMMARY STATISTICS & CV% COMPARISON ---
 #             st.write("---")
-#             st.subheader("3. Cohort Summary Statistics Table (PP-Gauss Focus)")
+#             st.subheader("3. Cohort Summary Statistics Table & CV% Stability Delta")
             
-#             sum_c1, sum_c2 = st.columns([1, 3])
-#             with sum_c1:
-#                 summary_data_source = st.radio(
-#                     "Summary Metric Source:",
-#                     ["Use Cleaned Dataset", "Use Original Dataset"],
-#                     key="summary_dataset_toggle"
-#                 )
-#             with sum_c2:
-#                 st.caption(f"This dynamic breakdown updates context metrics purely tracking standard operational deviations of the prime metric target parameter (`PP-Gauss`).")
+#             has_gauss = 'PP-Gauss' in plot_df.columns
+#             has_750 = 'PP-750' in plot_df.columns
 
-#             chosen_summary_df = global_cleaned_df if summary_data_source == "Use Cleaned Dataset" else plot_df
-
-#             if 'PP-Gauss' in chosen_summary_df.columns and not chosen_summary_df.empty:
-#                 # Group data to extract requested summary metrics
-#                 cohort_summary = chosen_summary_df.groupby('Sample Name')['PP-Gauss'].agg(
-#                     Total_Runs='count',
-#                     Mean_PP_Gauss='mean',
-#                     Std_PP_Gauss='std'
-#                 ).reset_index()
+#             if (has_gauss or has_750) and not plot_df.empty:
                 
-#                 # Calculate Coefficient of Variation (CV%)
-#                 cohort_summary['CV%'] = (cohort_summary['Std_PP_Gauss'] / cohort_summary['Mean_PP_Gauss']) * 100
-#                 cohort_summary['CV%'] = cohort_summary['CV%'].fillna(0)
+#                 def generate_summary_metrics(dataframe, suffix):
+#                     agg_dict = {}
+#                     if has_gauss: agg_dict['PP-Gauss'] = ['count', 'mean', 'std']
+#                     if has_750: agg_dict['PP-750'] = ['count', 'mean', 'std']
+                    
+#                     summary = dataframe.groupby('Sample Name').agg(agg_dict).reset_index()
+#                     summary.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in summary.columns]
+                    
+#                     final_cols = ['Sample Name']
+#                     if has_gauss:
+#                         summary[f'Total_Runs_Gauss_{suffix}'] = summary['PP-Gauss_count']
+#                         summary[f'Mean_Gauss_{suffix}'] = summary['PP-Gauss_mean']
+#                         summary[f'Std_Gauss_{suffix}'] = summary['PP-Gauss_std']
+#                         summary[f'CV%_Gauss_{suffix}'] = (summary[f'Std_Gauss_{suffix}'] / summary[f'Mean_Gauss_{suffix}']) * 100
+#                         final_cols.extend([f'Total_Runs_Gauss_{suffix}', f'Mean_Gauss_{suffix}', f'Std_Gauss_{suffix}', f'CV%_Gauss_{suffix}'])
+                    
+#                     if has_750:
+#                         summary[f'Total_Runs_750_{suffix}'] = summary['PP-750_count']
+#                         summary[f'Mean_750_{suffix}'] = summary['PP-750_mean']
+#                         summary[f'Std_750_{suffix}'] = summary['PP-750_std']
+#                         summary[f'CV%_750_{suffix}'] = (summary[f'Std_750_{suffix}'] / summary[f'Mean_750_{suffix}']) * 100
+#                         final_cols.extend([f'Total_Runs_750_{suffix}', f'Mean_750_{suffix}', f'Std_750_{suffix}', f'CV%_750_{suffix}'])
+                        
+#                     return summary[final_cols].fillna(0)
+
+#                 orig_metrics = generate_summary_metrics(plot_df, "orig")
+#                 clean_metrics = generate_summary_metrics(global_cleaned_df, "clean")
+#                 merged_summary = pd.merge(orig_metrics, clean_metrics, on='Sample Name', how='outer').fillna(0)
+
+#                 # --- CV% COMPARISON PLOT ---
+#                 if has_gauss:
+#                     cv_fig = go.Figure()
+#                     cv_fig.add_trace(go.Bar(
+#                         x=merged_summary['Sample Name'],
+#                         y=merged_summary['CV%_Gauss_orig'],
+#                         name='Original Dataset PP-Gauss CV%',
+#                         marker_color='#ef553b',
+#                         text=merged_summary['CV%_Gauss_orig'].round(2).astype(str) + '%',
+#                         textposition='auto',
+#                         textfont=dict(size=12, weight="bold")
+#                     ))
+#                     cv_fig.add_trace(go.Bar(
+#                         x=merged_summary['Sample Name'],
+#                         y=merged_summary['CV%_Gauss_clean'],
+#                         name=f'Cleaned Dataset PP-Gauss CV% (via {filter_metric})',
+#                         marker_color='#636efa',
+#                         text=merged_summary['CV%_Gauss_clean'].round(2).astype(str) + '%',
+#                         textposition='auto',
+#                         textfont=dict(size=12, weight="bold")
+#                     ))
+#                     cv_fig.update_layout(
+#                         title=dict(text=f"Stability Impact: PP-Gauss CV% Delta After Outlier Pruning", font=dict(size=18, weight="bold")),
+#                         xaxis_title="Sample Cohorts",
+#                         yaxis_title="Coefficient of Variation (CV %)",
+#                         barmode='group',
+#                         template='plotly_white',
+#                         height=420,
+#                         xaxis=dict(title_font=dict(size=14, weight="bold"), tickfont=dict(size=12)),
+#                         yaxis=dict(title_font=dict(size=14, weight="bold"), tickfont=dict(size=12)),
+#                         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=12))
+#                     )
+#                     st.plotly_chart(cv_fig, width="stretch", key="cv_comparison_chart")
+
+#                 # --- INTERACTIVE BREAKDOWN SUB-TABLE ---
+#                 sum_c1, sum_c2 = st.columns([1, 3])
+#                 with sum_c1:
+#                     summary_data_source = st.radio(
+#                         "Summary Metric Source for Table:",
+#                         ["Use Cleaned Dataset", "Use Original Dataset"],
+#                         key="summary_dataset_toggle"
+#                     )
+#                 with sum_c2:
+#                     st.caption(f"Granular analytical cross-table showing tracking indices and stability benchmarks for **PP-Gauss** and **PP-750** simultaneously.")
+
+#                 if summary_data_source == "Use Cleaned Dataset":
+#                     table_summary_view = clean_metrics.rename(columns={
+#                         'Total_Runs_Gauss_clean': 'Total_Runs',
+#                         'Mean_Gauss_clean': 'Mean_PP_Gauss', 'Std_Gauss_clean': 'Std_PP_Gauss', 'CV%_Gauss_clean': 'CV%_Gauss',
+#                         'Mean_750_clean': 'Mean_PP_750', 'Std_750_clean': 'Std_PP_750', 'CV%_750_clean': 'CV%_750'
+#                     })
+#                 else:
+#                     table_summary_view = orig_metrics.rename(columns={
+#                         'Total_Runs_Gauss_orig': 'Total_Runs',
+#                         'Mean_Gauss_orig': 'Mean_PP_Gauss', 'Std_Gauss_orig': 'Std_PP_Gauss', 'CV%_Gauss_orig': 'CV%_Gauss',
+#                         'Mean_750_orig': 'Mean_PP_750', 'Std_750_orig': 'Std_PP_750', 'CV%_750_orig': 'CV%_750'
+#                     })
 
 #                 st.dataframe(
-#                     cohort_summary,
+#                     table_summary_view[['Sample Name', 'Total_Runs', 'Mean_PP_Gauss', 'Std_PP_Gauss', 'CV%_Gauss', 'Mean_PP_750', 'Std_PP_750', 'CV%_750']],
 #                     column_config={
 #                         "Sample Name": st.column_config.TextColumn("Sample Name"),
-#                         "Total_Runs": st.column_config.NumberColumn("Total Runs Count", format="%d"),
+#                         "Total_Runs": st.column_config.NumberColumn("Total Runs", format="%d"),
 #                         "Mean_PP_Gauss": st.column_config.NumberColumn("Mean PP-Gauss", format="%.3f"),
-#                         "Std_PP_Gauss": st.column_config.NumberColumn("Std. Deviation PP-Gauss", format="%.3f"),
-#                         "CV%": st.column_config.NumberColumn("CV %", format="%.2f%%"),
+#                         "Std_PP_Gauss": st.column_config.NumberColumn("Std. Dev PP-Gauss", format="%.3f"),
+#                         "CV%_Gauss": st.column_config.NumberColumn("CV% (Gauss)", format="%.2f%%"),
+#                         "Mean_PP_750": st.column_config.NumberColumn("Mean PP-750", format="%.3f"),
+#                         "Std_PP_750": st.column_config.NumberColumn("Std. Dev PP-750", format="%.3f"),
+#                         "CV%_750": st.column_config.NumberColumn("CV% (750)", format="%.2f%%"),
 #                     },
 #                     hide_index=True,
-#                     use_container_width=True
+#                     width="stretch"
 #                 )
 #             else:
-#                 st.info("PP-Gauss metric not found or dataset view empty. Summary table cannot be rendered.")
+#                 st.info("Metrics not found or dataset view empty. Summary table skipped.")
 
 #             # --- SECTION 4: PLOTTED DATA REFERENCE TABLE ---
 #             st.write("---")
@@ -508,7 +599,7 @@
 #                         **{m: st.column_config.NumberColumn(m, width=120, format="%.2f") for m in available_metrics}
 #                     },
 #                     hide_index=True,
-#                     use_container_width=True
+#                     width="stretch"
 #                 )
 #             else:
 #                 st.info("The selected dataset view is empty.")
@@ -527,12 +618,165 @@
 #             with i_col3:
 #                 st.write(" ")
 #                 st.write(" ")
-#                 generate_btn = st.button("Generate Insights 🪄", use_container_width=True, key="btn_generate_insights")
+#                 generate_btn = st.button("Generate Insights 🪄", width="stretch", key="btn_generate_insights")
 
 #         if generate_btn:
 #             with st.spinner("Analyzing..."):
 #                 final_report = get_detailed_insights(plot_df, ai_metric, lens, custom_q)
 #                 st.info(final_report)
+
+#         # --- SECTION 6: AUTOMATED POWERPOINT REPORT ENGINE ---
+#         st.divider()
+#         st.subheader("6. 📝 PowerPoint Summary Report Engine")
+#         st.caption("Generate a fully structured executive slide deck incorporating global metrics, cohort comparisons, and dedicated structural run slides per unique sample.")
+        
+#         if st.button("Build PowerPoint Presentation Summary 🚀", width="stretch", key="btn_build_pptx"):
+#             with st.spinner("Rendering vector charts and drawing presentation canvas layers..."):
+#                 try:
+#                     # 1. Initialize Blank PowerPoint File Layout (Widescreen 16:9 Aspect Ratio)
+#                     prs = Presentation()
+#                     prs.slide_width = Inches(13.333)
+#                     prs.slide_height = Inches(7.5)
+#                     blank_layout = prs.slide_layouts[6] # Blank Slide Template
+
+#                     # --- HELPER FUNCTION: ADD BASIC HEADER TO SLIDES ---
+#                     def add_slide_header(slide, title_text):
+#                         txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(12.333), Inches(0.8))
+#                         tf = txBox.text_frame
+#                         tf.word_wrap = True
+#                         p = tf.paragraphs[0]
+#                         p.text = title_text
+#                         p.font.size = Pt(28)
+#                         p.font.bold = True
+#                         p.font.color.rgb = RGBColor(0, 51, 102)
+
+#                     # --- SLIDE 1: DECK COVER TITLE SLIDE ---
+#                     slide1 = prs.slides.add_slide(blank_layout)
+#                     title_box = slide1.shapes.add_textbox(Inches(1.0), Inches(2.2), Inches(11.333), Inches(2.5))
+#                     tf = title_box.text_frame
+#                     p1 = tf.paragraphs[0]
+#                     p1.text = "MJFF Analytics Executive Report"
+#                     p1.font.size = Pt(44)
+#                     p1.font.bold = True
+#                     p1.font.color.rgb = RGBColor(0, 51, 102)
+                    
+#                     p2 = tf.add_paragraph()
+#                     p2.text = f"Automated Instrumentation Run Summary • Outlier Baseline: {filter_metric} ({sigma_multiplier}σ)"
+#                     p2.font.size = Pt(18)
+#                     p2.font.color.rgb = RGBColor(102, 102, 102)
+
+#                     # --- SLIDE 2: COHORT STABILITY DELTA GRAPH ---
+#                     if has_gauss:
+#                         slide2 = prs.slides.add_slide(blank_layout)
+#                         add_slide_header(slide2, "Stability Performance: PP-Gauss CV% Variations")
+                        
+#                         img_stream = BytesIO()
+#                         cv_fig.write_image(img_stream, format="png", width=1100, height=500, scale=2)
+#                         img_stream.seek(0)
+#                         slide2.shapes.add_picture(img_stream, Inches(0.666), Inches(1.3), width=Inches(12.0))
+
+#                     # --- SLIDE 3: COHORT DATA TABLE SUMMARY ---
+#                     slide3 = prs.slides.add_slide(blank_layout)
+#                     add_slide_header(slide3, f"Cohort Parameter Analytics View ({summary_data_source})")
+                    
+#                     # Force dataframe alignment to safe structural columns
+#                     ppt_table_df = table_summary_view[['Sample Name', 'Total_Runs', 'Mean_PP_Gauss', 'Std_PP_Gauss', 'CV%_Gauss', 'Mean_PP_750', 'Std_PP_750', 'CV%_750']].reset_index(drop=True)
+                    
+#                     rows, cols = len(ppt_table_df) + 1, len(ppt_table_df.columns)
+#                     left, top, width, height = Inches(0.5), Inches(1.5), Inches(12.333), Inches(0.4 * rows)
+#                     table_shape = slide3.shapes.add_table(rows, cols, left, top, width, height)
+#                     table = table_shape.table
+
+#                     # Safe Display Headers Array matching exactly the column order above
+#                     headers_display = ["Sample Name", "Total Runs", "Mean Gauss", "Std Dev Gauss", "CV% Gauss", "Mean 750", "Std Dev 750", "CV% 750"]
+#                     for col_idx, text in enumerate(headers_display):
+#                         cell = table.cell(0, col_idx)
+#                         cell.text = text
+#                         cell.fill.solid()
+#                         cell.fill.fore_color.rgb = RGBColor(0, 51, 102)
+#                         p = cell.text_frame.paragraphs[0]
+#                         p.font.bold = True
+#                         p.font.color.rgb = RGBColor(255, 255, 255)
+#                         p.font.size = Pt(12)
+#                         p.alignment = PP_ALIGN.CENTER
+
+#                     # Safe value population via strict position lookup
+#                     for sequential_row_idx in range(len(ppt_table_df)):
+#                         row_series = ppt_table_df.iloc[sequential_row_idx]
+#                         for col_idx in range(len(row_series)):
+#                             cell = table.cell(sequential_row_idx + 1, col_idx)
+#                             value = row_series.iloc[col_idx]
+                            
+#                             # Clean cell formatting based on target metric name
+#                             col_name = ppt_table_df.columns[col_idx]
+#                             if isinstance(value, float):
+#                                 cell.text = f"{value:.3f}%" if "CV%" in col_name else f"{value:.3f}"
+#                             else:
+#                                 cell.text = str(value)
+                                
+#                             p = cell.text_frame.paragraphs[0]
+#                             p.font.size = Pt(11)
+#                             p.alignment = PP_ALIGN.CENTER
+
+#                     # --- SLIDES 4+: INDIVIDUAL SAMPLE PROFILE STACKS ---
+#                     def build_micro_timeline(dataframe, sample_name, y_metric, title_text):
+#                         sub_sub = dataframe[dataframe['Sample Name'] == sample_name].sort_values(by=['Datestamp', 'Run'])
+#                         sub_sub['X_Label'] = "Run: " + sub_sub['Run'].astype(str)
+                        
+#                         fig_micro = go.Figure(data=[
+#                             go.Bar(
+#                                 x=sub_sub['X_Label'],
+#                                 y=sub_sub[y_metric],
+#                                 marker_color=sticky_palette.get(sample_name, '#636efa'),
+#                                 text=sub_sub[y_metric].round(2) if not sub_sub[y_metric].isna().all() else "",
+#                                 textposition='auto'
+#                             )
+#                         ])
+#                         fig_micro.update_layout(
+#                             title=dict(text=title_text, font=dict(size=14, weight="bold")),
+#                             margin=dict(l=40, r=20, t=40, b=30),
+#                             template="plotly_white",
+#                             height=250,
+#                             yaxis=dict(title=y_metric, title_font=dict(size=10), tickfont=dict(size=9)),
+#                             xaxis=dict(tickfont=dict(size=10))
+#                         )
+#                         img_buf = BytesIO()
+#                         fig_micro.write_image(img_buf, format="png", width=1100, height=220, scale=2)
+#                         img_buf.seek(0)
+#                         return img_buf
+
+#                     unique_cohorts = sorted(plot_df['Sample Name'].unique())
+                    
+#                     for cohort in unique_cohorts:
+#                         slide_c = prs.slides.add_slide(blank_layout)
+#                         add_slide_header(slide_c, f"Sample Run Analysis: {cohort}")
+                        
+#                         if 'PP-Gauss' in plot_df.columns:
+#                             img_g = build_micro_timeline(global_cleaned_df, cohort, 'PP-Gauss', "PP-Gauss Cleaned Signal Timeline")
+#                             slide_c.shapes.add_picture(img_g, Inches(0.666), Inches(1.2), width=Inches(12.0))
+                            
+#                         if 'PP-750' in plot_df.columns:
+#                             img_750 = build_micro_timeline(global_cleaned_df, cohort, 'PP-750', "PP-750 Cleaned Signal Timeline")
+#                             slide_c.shapes.add_picture(img_750, Inches(0.666), Inches(3.2), width=Inches(12.0))
+                            
+#                         if 'Barcode av.' in plot_df.columns:
+#                             img_bav = build_micro_timeline(global_cleaned_df, cohort, 'Barcode av.', "Barcode av. Reference Run Timeline")
+#                             slide_c.shapes.add_picture(img_bav, Inches(0.666), Inches(5.2), width=Inches(12.0))
+
+#                     # 4. Save and Deliver Presentation File Stream
+#                     ppt_out = BytesIO()
+#                     prs.save(ppt_out)
+#                     ppt_out.seek(0)
+                    
+#                     st.success("PowerPoint compilation complete! Click below to download.")
+#                     st.download_button(
+#                         label="📥 Download PowerPoint Report (.pptx)",
+#                         data=ppt_out,
+#                         file_name="MJFF_Instrumentation_Summary_Report.pptx",
+#                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+#                     )
+#                 except Exception as e:
+#                     st.error(f"Failed to generate presentation deck: {str(e)}")
 
 import streamlit as st
 import pandas as pd
@@ -541,6 +785,16 @@ from plotly.subplots import make_subplots
 import plotly.express as px
 import re
 from groq import Groq
+from io import BytesIO
+
+# --- PPTX GENERATION DEPENDENCIES ---
+try:
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+except ImportError:
+    st.error("Missing dependency: please run `pip install python-pptx kaleido` in your terminal environment.")
 
 # --- INITIALIZATION ---
 if 'master_data' not in st.session_state:
@@ -599,6 +853,7 @@ with st.expander("📖 How to use this App (Feature Guide)", expanded=True):
     * **Target Dropdown Filter**: In **Section 2**, cleanly isolate individual groups from your dropdown menu to instantly re-render active viewports.
     * **📊 Cross-Metric Outlier Filtering**: Filter out anomalies using one parameter (e.g., *Barcode std.*) and view the surviving records plotted in your core parameter (e.g., *PP-Gauss*).
     * **📈 Cohort Summaries & CV% Shifts**: Section 3 tracks quantitative and visual shifts in the Coefficient of Variation ($CV\%$) between raw and refined streams.
+    * **📝 Automated PPTX Generation**: Section 6 auto-compiles all macro system metrics, side-by-side comparative diagnostics, and individual data stacks.
     """)
 
 # --- AI INSIGHT ENGINE ---
@@ -758,7 +1013,7 @@ if not st.session_state.master_data.empty:
             "Run": st.column_config.TextColumn("Run Custom Override"),
         },
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
     )
 
     col1, col2 = st.columns([1, 5])
@@ -783,6 +1038,11 @@ if st.session_state.show_plotting:
     if base_filtered.empty:
         st.warning("No samples marked for selection. Please check the 'Plot?' boxes in the table above.")
     else:
+        # --- FIXED STICKY PALETTE INITIALIZATION ---
+        all_unique_names = sorted(st.session_state.master_data['Sample Name'].unique())
+        color_palette = px.colors.qualitative.Plotly
+        sticky_palette = {name: color_palette[idx % len(color_palette)] for idx, name in enumerate(all_unique_names)}
+
         available_sample_names = sorted(base_filtered['Sample Name'].unique())
         selected_samples = st.multiselect(
             "🔎 Select Sample Names to Plot from Dropdown:",
@@ -825,7 +1085,7 @@ if st.session_state.show_plotting:
                     key="global_sigma_multiplier"
                 )
             with out_c3:
-                st.caption(f"**Rule Logic:** The system calculates the mean and standard deviation of **{filter_metric}** for each cohort. Points outside ±{sigma_multiplier}σ will be completely stripped out from the cleaned views.")
+                st.caption(f"**Rule Logic:** The system calculates the mean and standard deviation of **{filter_metric}** for each cohort. Points outside $\pm${sigma_multiplier}$\sigma$ will be completely stripped out from the cleaned views.")
 
             view_mode = st.radio(
                 "Select Visualization Mode:",
@@ -834,7 +1094,7 @@ if st.session_state.show_plotting:
                 key="view_mode_selector"
             )
 
-            # Pre-calculate the cleaned dataset globally so it matches across all plot windows and data tables
+            # Pre-calculate the cleaned dataset globally so it matches across all components
             cleaned_plot_df_list = []
             for name in plot_df['Sample Name'].unique():
                 sub = plot_df[plot_df['Sample Name'] == name]
@@ -855,7 +1115,6 @@ if st.session_state.show_plotting:
             
             global_cleaned_df = pd.concat(cleaned_plot_df_list, ignore_index=True) if cleaned_plot_df_list else plot_df.copy()
 
-            # Track total lines pruned
             lines_removed = len(plot_df) - len(global_cleaned_df)
             if lines_removed > 0:
                 st.toast(f"✂️ Pruned {lines_removed} outlier runs based on {filter_metric} ({sigma_multiplier}σ)!", icon="ℹ️")
@@ -921,10 +1180,7 @@ if st.session_state.show_plotting:
                         htemp = "<b>%{x}</b><br>Mean: %{y:.2f}<br>Std Dev: %{customdata:.2f}<extra></extra>"
                         display_df = agg_results
 
-                    unique_names = plot_df['Sample Name'].unique()
-                    color_palette = px.colors.qualitative.Plotly 
-                    name_to_color = {name: color_palette[idx % len(color_palette)] for idx, name in enumerate(unique_names)}
-                    display_df['BarColor'] = display_df['Sample Name'].map(name_to_color)
+                    display_df['BarColor'] = display_df['Sample Name'].map(sticky_palette)
 
                     fig = go.Figure()
                     fig.add_trace(
@@ -936,27 +1192,35 @@ if st.session_state.show_plotting:
                             textposition='auto',
                             error_y=dict(type='data', array=error_val, visible=True) if view_mode == "Global (Mean & Std Dev)" else None,
                             customdata=custom_data,
-                            hovertemplate=htemp
+                            hovertemplate=htemp,
+                            textfont=dict(size=13, weight="bold")
                         )
                     )
 
                     title_lbl = f"{selected_metric} (Cleaned via {filter_metric} @ {sigma_multiplier}σ)" if is_clean_view else f"{selected_metric} (Unfiltered Original Data)"
+                    
                     fig.update_layout(
-                        title=title_lbl,
-                        height=450, 
+                        title=dict(text=title_lbl, font=dict(size=18, weight="bold")),
+                        height=480, 
                         yaxis_title=selected_metric, 
                         template="plotly_white", 
                         showlegend=False,
-                        yaxis=dict(range=[0, y_val.max() * 1.2] if not y_val.empty and not y_val.isna().all() else [0, 1])
+                        yaxis=dict(
+                            range=[0, y_val.max() * 1.2] if not y_val.empty and not y_val.isna().all() else [0, 1],
+                            title_font=dict(size=14, weight="bold"),
+                            tickfont=dict(size=12)
+                        ),
+                        xaxis=dict(tickfont=dict(size=12)),
+                        hoverlabel=dict(font_size=14)
                     )
                     fig.update_xaxes(tickangle=0)
                     return fig
 
                 graph_col1, graph_col2 = st.columns(2)
                 with graph_col1:
-                    st.plotly_chart(process_and_render_data(plot_df, is_clean_view=False), use_container_width=True, key=f"chart_orig_{i}")
+                    st.plotly_chart(process_and_render_data(plot_df, is_clean_view=False), width="stretch", key=f"chart_orig_{i}")
                 with graph_col2:
-                    st.plotly_chart(process_and_render_data(global_cleaned_df, is_clean_view=True), use_container_width=True, key=f"chart_clean_{i}")
+                    st.plotly_chart(process_and_render_data(global_cleaned_df, is_clean_view=True), width="stretch", key=f"chart_clean_{i}")
 
             col_btn1, col_btn2 = st.columns([1, 4])
             with col_btn1:
@@ -973,50 +1237,73 @@ if st.session_state.show_plotting:
             st.write("---")
             st.subheader("3. Cohort Summary Statistics Table & CV% Stability Delta")
             
-            if 'PP-Gauss' in plot_df.columns and not plot_df.empty:
-                # Calculate metrics for Original Dataset
-                orig_summary = plot_df.groupby('Sample Name')['PP-Gauss'].agg(
-                    Total_Runs_Orig='count', Mean_Orig='mean', Std_Orig='std'
-                ).reset_index()
-                orig_summary['CV%_Orig'] = (orig_summary['Std_Orig'] / orig_summary['Mean_Orig']) * 100
+            has_gauss = 'PP-Gauss' in plot_df.columns
+            has_750 = 'PP-750' in plot_df.columns
 
-                # Calculate metrics for Cleaned Dataset
-                clean_summary = global_cleaned_df.groupby('Sample Name')['PP-Gauss'].agg(
-                    Total_Runs_Clean='count', Mean_Clean='mean', Std_Clean='std'
-                ).reset_index()
-                clean_summary['CV%_Clean'] = (clean_summary['Std_Clean'] / clean_summary['Mean_Clean']) * 100
+            if (has_gauss or has_750) and not plot_df.empty:
+                
+                def generate_summary_metrics(dataframe, suffix):
+                    agg_dict = {}
+                    if has_gauss: agg_dict['PP-Gauss'] = ['count', 'mean', 'std']
+                    if has_750: agg_dict['PP-750'] = ['count', 'mean', 'std']
+                    
+                    summary = dataframe.groupby('Sample Name').agg(agg_dict).reset_index()
+                    summary.columns = [f"{col[0]}_{col[1]}" if col[1] else col[0] for col in summary.columns]
+                    
+                    final_cols = ['Sample Name']
+                    if has_gauss:
+                        summary[f'Total_Runs_Gauss_{suffix}'] = summary['PP-Gauss_count']
+                        summary[f'Mean_Gauss_{suffix}'] = summary['PP-Gauss_mean']
+                        summary[f'Std_Gauss_{suffix}'] = summary['PP-Gauss_std']
+                        summary[f'CV%_Gauss_{suffix}'] = (summary[f'Std_Gauss_{suffix}'] / summary[f'Mean_Gauss_{suffix}']) * 100
+                        final_cols.extend([f'Total_Runs_Gauss_{suffix}', f'Mean_Gauss_{suffix}', f'Std_Gauss_{suffix}', f'CV%_Gauss_{suffix}'])
+                    
+                    if has_750:
+                        summary[f'Total_Runs_750_{suffix}'] = summary['PP-750_count']
+                        summary[f'Mean_750_{suffix}'] = summary['PP-750_mean']
+                        summary[f'Std_750_{suffix}'] = summary['PP-750_std']
+                        summary[f'CV%_750_{suffix}'] = (summary[f'Std_750_{suffix}'] / summary[f'Mean_750_{suffix}']) * 100
+                        final_cols.extend([f'Total_Runs_750_{suffix}', f'Mean_750_{suffix}', f'Std_750_{suffix}', f'CV%_750_{suffix}'])
+                        
+                    return summary[final_cols].fillna(0)
 
-                # Merge both summaries to generate side-by-side structures
-                merged_summary = pd.merge(orig_summary, clean_summary, on='Sample Name', how='outer').fillna(0)
+                orig_metrics = generate_summary_metrics(plot_df, "orig")
+                clean_metrics = generate_summary_metrics(global_cleaned_df, "clean")
+                merged_summary = pd.merge(orig_metrics, clean_metrics, on='Sample Name', how='outer').fillna(0)
 
                 # --- CV% COMPARISON PLOT ---
-                cv_fig = go.Figure()
-                cv_fig.add_trace(go.Bar(
-                    x=merged_summary['Sample Name'],
-                    y=merged_summary['CV%_Orig'],
-                    name='Original Dataset CV%',
-                    marker_color='#ef553b',
-                    text=merged_summary['CV%_Orig'].round(2).astype(str) + '%',
-                    textposition='auto'
-                ))
-                cv_fig.add_trace(go.Bar(
-                    x=merged_summary['Sample Name'],
-                    y=merged_summary['CV%_Clean'],
-                    name=f'Cleaned Dataset CV% (via {filter_metric})',
-                    marker_color='#636efa',
-                    text=merged_summary['CV%_Clean'].round(2).astype(str) + '%',
-                    textposition='auto'
-                ))
-                cv_fig.update_layout(
-                    title=f"Stability Impact: PP-Gauss CV% Delta After Outlier Pruning",
-                    xaxis_title="Sample Cohorts",
-                    yaxis_title="Coefficient of Variation (CV %)",
-                    barmode='group',
-                    template='plotly_white',
-                    height=400,
-                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                )
-                st.plotly_chart(cv_fig, use_container_width=True, key="cv_comparison_chart")
+                if has_gauss:
+                    cv_fig = go.Figure()
+                    cv_fig.add_trace(go.Bar(
+                        x=merged_summary['Sample Name'],
+                        y=merged_summary['CV%_Gauss_orig'],
+                        name='Original Dataset PP-Gauss CV%',
+                        marker_color='#ef553b',
+                        text=merged_summary['CV%_Gauss_orig'].round(2).astype(str) + '%',
+                        textposition='auto',
+                        textfont=dict(size=12, weight="bold")
+                    ))
+                    cv_fig.add_trace(go.Bar(
+                        x=merged_summary['Sample Name'],
+                        y=merged_summary['CV%_Gauss_clean'],
+                        name=f'Cleaned Dataset PP-Gauss CV% (via {filter_metric})',
+                        marker_color='#636efa',
+                        text=merged_summary['CV%_Gauss_clean'].round(2).astype(str) + '%',
+                        textposition='auto',
+                        textfont=dict(size=12, weight="bold")
+                    ))
+                    cv_fig.update_layout(
+                        title=dict(text=f"Stability Impact: PP-Gauss CV% Delta After Outlier Pruning", font=dict(size=18, weight="bold")),
+                        xaxis_title="Sample Cohorts",
+                        yaxis_title="Coefficient of Variation (CV %)",
+                        barmode='group',
+                        template='plotly_white',
+                        height=420,
+                        xaxis=dict(title_font=dict(size=14, weight="bold"), tickfont=dict(size=12)),
+                        yaxis=dict(title_font=dict(size=14, weight="bold"), tickfont=dict(size=12)),
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=12))
+                    )
+                    st.plotly_chart(cv_fig, width="stretch", key="cv_comparison_chart")
 
                 # --- INTERACTIVE BREAKDOWN SUB-TABLE ---
                 sum_c1, sum_c2 = st.columns([1, 3])
@@ -1027,34 +1314,38 @@ if st.session_state.show_plotting:
                         key="summary_dataset_toggle"
                     )
                 with sum_c2:
-                    st.caption(f"Review granular analytical parameter statistics targeting variance reductions in the target tracking field `PP-Gauss` below.")
+                    st.caption(f"Granular analytical cross-table showing tracking indices and stability benchmarks for **PP-Gauss** and **PP-750** simultaneously.")
 
-                # Construct appropriate user reporting sub-view
                 if summary_data_source == "Use Cleaned Dataset":
-                    table_summary_view = clean_summary.rename(columns={
-                        'Total_Runs_Clean': 'Total_Runs', 'Mean_Clean': 'Mean_PP_Gauss',
-                        'Std_Clean': 'Std_PP_Gauss', 'CV%_Clean': 'CV%'
+                    table_summary_view = clean_metrics.rename(columns={
+                        'Total_Runs_Gauss_clean': 'Total_Runs',
+                        'Mean_Gauss_clean': 'Mean_PP_Gauss', 'Std_Gauss_clean': 'Std_PP_Gauss', 'CV%_Gauss_clean': 'CV%_Gauss',
+                        'Mean_750_clean': 'Mean_PP_750', 'Std_750_clean': 'Std_PP_750', 'CV%_750_clean': 'CV%_750'
                     })
                 else:
-                    table_summary_view = orig_summary.rename(columns={
-                        'Total_Runs_Orig': 'Total_Runs', 'Mean_Orig': 'Mean_PP_Gauss',
-                        'Std_Orig': 'Std_PP_Gauss', 'CV%_Orig': 'CV%'
+                    table_summary_view = orig_metrics.rename(columns={
+                        'Total_Runs_Gauss_orig': 'Total_Runs',
+                        'Mean_Gauss_orig': 'Mean_PP_Gauss', 'Std_Gauss_orig': 'Std_PP_Gauss', 'CV%_Gauss_orig': 'CV%_Gauss',
+                        'Mean_750_orig': 'Mean_PP_750', 'Std_750_orig': 'Std_PP_750', 'CV%_750_orig': 'CV%_750'
                     })
 
                 st.dataframe(
-                    table_summary_view[['Sample Name', 'Total_Runs', 'Mean_PP_Gauss', 'Std_PP_Gauss', 'CV%']],
+                    table_summary_view[['Sample Name', 'Total_Runs', 'Mean_PP_Gauss', 'Std_PP_Gauss', 'CV%_Gauss', 'Mean_PP_750', 'Std_PP_750', 'CV%_750']],
                     column_config={
                         "Sample Name": st.column_config.TextColumn("Sample Name"),
-                        "Total_Runs": st.column_config.NumberColumn("Total Runs Count", format="%d"),
+                        "Total_Runs": st.column_config.NumberColumn("Total Runs", format="%d"),
                         "Mean_PP_Gauss": st.column_config.NumberColumn("Mean PP-Gauss", format="%.3f"),
-                        "Std_PP_Gauss": st.column_config.NumberColumn("Std. Deviation PP-Gauss", format="%.3f"),
-                        "CV%": st.column_config.NumberColumn("CV %", format="%.2f%%"),
+                        "Std_PP_Gauss": st.column_config.NumberColumn("Std. Dev PP-Gauss", format="%.3f"),
+                        "CV%_Gauss": st.column_config.NumberColumn("CV% (Gauss)", format="%.2f%%"),
+                        "Mean_PP_750": st.column_config.NumberColumn("Mean PP-750", format="%.3f"),
+                        "Std_PP_750": st.column_config.NumberColumn("Std. Dev PP-750", format="%.3f"),
+                        "CV%_750": st.column_config.NumberColumn("CV% (750)", format="%.2f%%"),
                     },
                     hide_index=True,
-                    use_container_width=True
+                    width="stretch"
                 )
             else:
-                st.info("PP-Gauss metric not found or dataset view empty. Summary components skipped.")
+                st.info("Metrics not found or dataset view empty. Summary table skipped.")
 
             # --- SECTION 4: PLOTTED DATA REFERENCE TABLE ---
             st.write("---")
@@ -1088,7 +1379,7 @@ if st.session_state.show_plotting:
                         **{m: st.column_config.NumberColumn(m, width=120, format="%.2f") for m in available_metrics}
                     },
                     hide_index=True,
-                    use_container_width=True
+                    width="stretch"
                 )
             else:
                 st.info("The selected dataset view is empty.")
@@ -1107,9 +1398,217 @@ if st.session_state.show_plotting:
             with i_col3:
                 st.write(" ")
                 st.write(" ")
-                generate_btn = st.button("Generate Insights 🪄", use_container_width=True, key="btn_generate_insights")
+                generate_btn = st.button("Generate Insights 🪄", width="stretch", key="btn_generate_insights")
 
         if generate_btn:
             with st.spinner("Analyzing..."):
                 final_report = get_detailed_insights(plot_df, ai_metric, lens, custom_q)
                 st.info(final_report)
+
+        # --- SECTION 6: AUTOMATED POWERPOINT REPORT ENGINE ---
+        st.divider()
+        st.subheader("6. 📝 PowerPoint Summary Report Engine")
+        st.caption("Generate a fully structured executive slide deck incorporating global metrics, cohort comparisons, and dedicated structural run slides per unique sample.")
+        
+        if st.button("Build PowerPoint Presentation Summary 🚀", width="stretch", key="btn_build_pptx"):
+            with st.spinner("Rendering vector charts and drawing presentation canvas layers..."):
+                try:
+                    # 1. Initialize Blank PowerPoint File Layout (Widescreen 16:9 Aspect Ratio)
+                    prs = Presentation()
+                    prs.slide_width = Inches(13.333)
+                    prs.slide_height = Inches(7.5)
+                    blank_layout = prs.slide_layouts[6] 
+
+                    # --- HELPER FUNCTION: ADD BASIC HEADER TO SLIDES ---
+                    def add_slide_header(slide, title_text):
+                        txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(12.333), Inches(0.8))
+                        tf = txBox.text_frame
+                        tf.word_wrap = True
+                        p = tf.paragraphs[0]
+                        p.text = title_text
+                        p.font.size = Pt(28)
+                        p.font.bold = True
+                        p.font.color.rgb = RGBColor(0, 51, 102)
+
+                    # --- HELPER FUNCTION: BUILD MACRO OVERVIEW CHARTS ---
+                    def build_macro_chart(dataframe, mode, is_clean, title):
+                        temp = dataframe.copy()
+                        # Enforce Ascending Sorting based on the group mean of PP-Gauss
+                        group_means = temp.groupby('Sample Name')['PP-Gauss'].mean()
+                        sorted_names = group_means.sort_values(ascending=True).index
+                        temp['Sample Name'] = pd.Categorical(temp['Sample Name'], categories=sorted_names, ordered=True)
+                        
+                        fig = go.Figure()
+                        if mode == "Detailed":
+                            temp = temp.sort_values(['Sample Name', 'Datestamp', 'Run'])
+                            temp['X_Label'] = temp['Sample Name'].astype(str) + "_" + temp['Run'].astype(str)
+                            fig.add_trace(go.Bar(
+                                x=temp['X_Label'], y=temp['PP-Gauss'],
+                                marker_color=temp['Sample Name'].map(sticky_palette),
+                                text=temp['PP-Gauss'].round(2), textposition='auto'
+                            ))
+                        else:
+                            agg = temp.groupby('Sample Name')['PP-Gauss'].agg(['mean', 'std']).reset_index()
+                            agg['Sample Name'] = pd.Categorical(agg['Sample Name'], categories=sorted_names, ordered=True)
+                            agg = agg.sort_values('Sample Name')
+                            fig.add_trace(go.Bar(
+                                x=agg['Sample Name'], y=agg['mean'],
+                                marker_color=agg['Sample Name'].map(sticky_palette),
+                                error_y=dict(type='data', array=agg['std'], visible=True),
+                                text=agg['mean'].round(2), textposition='auto'
+                            ))
+                            
+                        fig.update_layout(
+                            title=dict(text=title, font=dict(size=14, weight="bold")),
+                            margin=dict(l=40, r=20, t=40, b=30), template="plotly_white", height=260,
+                            yaxis=dict(title="PP-Gauss", title_font=dict(size=11), tickfont=dict(size=9)),
+                            xaxis=dict(tickfont=dict(size=10, weight="bold")), showlegend=False
+                        )
+                        buf = BytesIO()
+                        fig.write_image(buf, format="png", width=1150, height=240, scale=2)
+                        buf.seek(0)
+                        return buf
+
+                    # --- SLIDE 1: DECK COVER TITLE SLIDE ---
+                    slide1 = prs.slides.add_slide(blank_layout)
+                    title_box = slide1.shapes.add_textbox(Inches(1.0), Inches(2.2), Inches(11.333), Inches(2.5))
+                    tf = title_box.text_frame
+                    p1 = tf.paragraphs[0]
+                    p1.text = "MJFF Analytics Executive Report"
+                    p1.font.size = Pt(44)
+                    p1.font.bold = True
+                    p1.font.color.rgb = RGBColor(0, 51, 102)
+                    
+                    p2 = tf.add_paragraph()
+                    p2.text = f"Automated Instrumentation Run Summary • Outlier Baseline: {filter_metric} ({sigma_multiplier}σ)"
+                    p2.font.size = Pt(18)
+                    p2.font.color.rgb = RGBColor(102, 102, 102)
+
+                    # --- SLIDE 2: NEW UNFILTERED GLOBAL PROFILE SLIDE ---
+                    slide_macro_orig = prs.slides.add_slide(blank_layout)
+                    add_slide_header(slide_macro_orig, "Global System Profiles: Unfiltered Cohort Data")
+                    
+                    img_orig_det = build_macro_chart(plot_df, "Detailed", is_clean=False, title="1. All Individual Runs System Timeline (Ascending by Group Mean)")
+                    slide_macro_orig.shapes.add_picture(img_orig_det, Inches(0.666), Inches(1.3), width=Inches(12.0))
+                    
+                    img_orig_grp = build_macro_chart(plot_df, "Grouped", is_clean=False, title="2. Aggregated Cohort Systems Analysis (Mean ± SD Dev)")
+                    slide_macro_orig.shapes.add_picture(img_orig_grp, Inches(0.666), Inches(4.3), width=Inches(12.0))
+
+                    # --- SLIDE 3: NEW CLEANED GLOBAL PROFILE SLIDE ---
+                    slide_macro_clean = prs.slides.add_slide(blank_layout)
+                    add_slide_header(slide_macro_clean, f"Global System Profiles: Refined Clean Data ({sigma_multiplier}σ Outliers Pruned)")
+                    
+                    img_clean_det = build_macro_chart(global_cleaned_df, "Detailed", is_clean=True, title=f"3. Cleaned Individual Runs System Timeline (via {filter_metric})")
+                    slide_macro_clean.shapes.add_picture(img_clean_det, Inches(0.666), Inches(1.3), width=Inches(12.0))
+                    
+                    img_clean_grp = build_macro_chart(global_cleaned_df, "Grouped", is_clean=True, title=f"4. Cleaned Aggregated Cohort Systems Analysis (Recalculated Mean ± SD Dev)")
+                    slide_macro_clean.shapes.add_picture(img_clean_grp, Inches(0.666), Inches(4.3), width=Inches(12.0))
+
+                    # --- SLIDE 4: COHORT STABILITY DELTA GRAPH ---
+                    if has_gauss:
+                        slide4 = prs.slides.add_slide(blank_layout)
+                        add_slide_header(slide4, "Stability Performance: PP-Gauss CV% Variations")
+                        
+                        img_stream = BytesIO()
+                        cv_fig.write_image(img_stream, format="png", width=1100, height=500, scale=2)
+                        img_stream.seek(0)
+                        slide4.shapes.add_picture(img_stream, Inches(0.666), Inches(1.3), width=Inches(12.0))
+
+                    # --- SLIDE 5: COHORT DATA TABLE SUMMARY ---
+                    slide5 = prs.slides.add_slide(blank_layout)
+                    add_slide_header(slide5, f"Cohort Parameter Analytics View ({summary_data_source})")
+                    
+                    ppt_table_df = table_summary_view[['Sample Name', 'Total_Runs', 'Mean_PP_Gauss', 'Std_PP_Gauss', 'CV%_Gauss', 'Mean_PP_750', 'Std_PP_750', 'CV%_750']].reset_index(drop=True)
+                    
+                    rows, cols = len(ppt_table_df) + 1, len(ppt_table_df.columns)
+                    left, top, width, height = Inches(0.5), Inches(1.5), Inches(12.333), Inches(0.4 * rows)
+                    table_shape = slide5.shapes.add_table(rows, cols, left, top, width, height)
+                    table = table_shape.table
+
+                    headers_display = ["Sample Name", "Total Runs", "Mean Gauss", "Std Dev Gauss", "CV% Gauss", "Mean 750", "Std Dev 750", "CV% 750"]
+                    for col_idx, text in enumerate(headers_display):
+                        cell = table.cell(0, col_idx)
+                        cell.text = text
+                        cell.fill.solid()
+                        cell.fill.fore_color.rgb = RGBColor(0, 51, 102)
+                        p = cell.text_frame.paragraphs[0]
+                        p.font.bold = True
+                        p.font.color.rgb = RGBColor(255, 255, 255)
+                        p.font.size = Pt(12)
+                        p.alignment = PP_ALIGN.CENTER
+
+                    for sequential_row_idx in range(len(ppt_table_df)):
+                        row_series = ppt_table_df.iloc[sequential_row_idx]
+                        for col_idx in range(len(row_series)):
+                            cell = table.cell(sequential_row_idx + 1, col_idx)
+                            value = row_series.iloc[col_idx]
+                            
+                            col_name = ppt_table_df.columns[col_idx]
+                            if isinstance(value, float):
+                                cell.text = f"{value:.3f}%" if "CV%" in col_name else f"{value:.3f}"
+                            else:
+                                cell.text = str(value)
+                                
+                            p = cell.text_frame.paragraphs[0]
+                            p.font.size = Pt(11)
+                            p.alignment = PP_ALIGN.CENTER
+
+                    # --- SLIDES 6+: INDIVIDUAL COHORT RUN TIMELINES ---
+                    def build_micro_timeline(dataframe, sample_name, y_metric, title_text):
+                        sub_sub = dataframe[dataframe['Sample Name'] == sample_name].sort_values(by=['Datestamp', 'Run'])
+                        sub_sub['X_Label'] = "Run: " + sub_sub['Run'].astype(str)
+                        
+                        fig_micro = go.Figure(data=[
+                            go.Bar(
+                                x=sub_sub['X_Label'],
+                                y=sub_sub[y_metric],
+                                marker_color=sticky_palette.get(sample_name, '#636efa'),
+                                text=sub_sub[y_metric].round(2) if not sub_sub[y_metric].isna().all() else "",
+                                textposition='auto'
+                            )
+                        ])
+                        fig_micro.update_layout(
+                            title=dict(text=title_text, font=dict(size=14, weight="bold")),
+                            margin=dict(l=40, r=20, t=40, b=30),
+                            template="plotly_white",
+                            height=250,
+                            yaxis=dict(title=y_metric, title_font=dict(size=10), tickfont=dict(size=9)),
+                            xaxis=dict(tickfont=dict(size=10))
+                        )
+                        img_buf = BytesIO()
+                        fig_micro.write_image(img_buf, format="png", width=1100, height=220, scale=2)
+                        img_buf.seek(0)
+                        return img_buf
+
+                    unique_cohorts = sorted(plot_df['Sample Name'].unique())
+                    
+                    for cohort in unique_cohorts:
+                        slide_c = prs.slides.add_slide(blank_layout)
+                        add_slide_header(slide_c, f"Sample Run Analysis: {cohort}")
+                        
+                        if 'PP-Gauss' in plot_df.columns:
+                            img_g = build_micro_timeline(global_cleaned_df, cohort, 'PP-Gauss', "PP-Gauss Cleaned Signal Timeline")
+                            slide_c.shapes.add_picture(img_g, Inches(0.666), Inches(1.2), width=Inches(12.0))
+                            
+                        if 'PP-750' in plot_df.columns:
+                            img_750 = build_micro_timeline(global_cleaned_df, cohort, 'PP-750', "PP-750 Cleaned Signal Timeline")
+                            slide_c.shapes.add_picture(img_750, Inches(0.666), Inches(3.2), width=Inches(12.0))
+                            
+                        if 'Barcode av.' in plot_df.columns:
+                            img_bav = build_micro_timeline(global_cleaned_df, cohort, 'Barcode av.', "Barcode av. Reference Run Timeline")
+                            slide_c.shapes.add_picture(img_bav, Inches(0.666), Inches(5.2), width=Inches(12.0))
+
+                    # Save and Deliver Presentation File Stream
+                    ppt_out = BytesIO()
+                    prs.save(ppt_out)
+                    ppt_out.seek(0)
+                    
+                    st.success("PowerPoint compilation complete! Click below to download.")
+                    st.download_button(
+                        label="📥 Download PowerPoint Report (.pptx)",
+                        data=ppt_out,
+                        file_name="MJFF_Instrumentation_Summary_Report.pptx",
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    )
+                except Exception as e:
+                    st.error(f"Failed to generate presentation deck: {str(e)}")
